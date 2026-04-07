@@ -1,30 +1,40 @@
-// tests/transaction.test.js
-const request = require('supertest');
+const request  = require('supertest');
 const mongoose = require('mongoose');
-const app = require('../index');
+const app      = require('../index');
+
+const TEST_DB = process.env.MONGO_URI;
 
 let adminToken;
 let viewerToken;
 let transactionId;
 
 beforeAll(async () => {
-  await mongoose.connect('mongodb://localhost:27017/finance_test_db2');
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+  await mongoose.connect(TEST_DB);
 
-  // Register admin and viewer for testing
-  const adminRes = await request(app).post('/api/auth/register').send({
-    name: 'Admin', email: 'admin2@test.com', password: 'pass123', role: 'admin',
-  });
+  // Clean test users
+  await mongoose.connection.collection('users')
+    .deleteMany({ email: { $in: ['admin2@test.com', 'viewer@test.com'] } });
+
+  const adminRes = await request(app)
+    .post('/api/auth/register')
+    .send({ name: 'Admin', email: 'admin2@test.com', password: 'pass123', role: 'admin' });
   adminToken = adminRes.body.data.token;
 
-  const viewerRes = await request(app).post('/api/auth/register').send({
-    name: 'Viewer', email: 'viewer@test.com', password: 'pass123', role: 'viewer',
-  });
+  const viewerRes = await request(app)
+    .post('/api/auth/register')
+    .send({ name: 'Viewer', email: 'viewer@test.com', password: 'pass123', role: 'viewer' });
   viewerToken = viewerRes.body.data.token;
 });
 
 afterAll(async () => {
-  await mongoose.connection.db.dropDatabase();
-  await mongoose.connection.close();
+  try {
+    await mongoose.connection.collection('users')
+      .deleteMany({ email: { $in: ['admin2@test.com', 'viewer@test.com'] } });
+  } catch(e) {}
+  await mongoose.disconnect();
 });
 
 describe('Transaction Routes', () => {
@@ -35,7 +45,7 @@ describe('Transaction Routes', () => {
       .send({ amount: 5000, type: 'income', category: 'Salary', date: '2024-03-01' });
 
     expect(res.statusCode).toBe(201);
-    transactionId = res.body.data.transaction._id; // Save for later
+    transactionId = res.body.data.transaction._id;
   });
 
   it('should NOT allow viewer to create a transaction', async () => {
@@ -44,7 +54,7 @@ describe('Transaction Routes', () => {
       .set('Authorization', `Bearer ${viewerToken}`)
       .send({ amount: 100, type: 'expense', category: 'Food' });
 
-    expect(res.statusCode).toBe(403); // 403 = Forbidden
+    expect(res.statusCode).toBe(403);
   });
 
   it('should allow viewer to read transactions', async () => {

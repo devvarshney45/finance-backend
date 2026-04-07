@@ -1,26 +1,34 @@
-// tests/auth.test.js
-// Integration tests for auth routes using Jest + Supertest
-
-const request = require('supertest');
+const request  = require('supertest');
 const mongoose = require('mongoose');
-const app = require('../index'); // Import our Express app
+const app      = require('../index');
 
-// Before all tests, connect to a test database
+// ✅ FIX — Atlas ka hi URL use karo, local nahi
+const TEST_DB  = process.env.MONGO_URI;
+
 beforeAll(async () => {
-  await mongoose.connect('mongodb://localhost:27017/finance_test_db');
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+  await mongoose.connect(TEST_DB);
 });
 
-// After all tests, clean up and disconnect
 afterAll(async () => {
-  await mongoose.connection.db.dropDatabase(); // Clean test data
-  await mongoose.connection.close();
+  // Test users clean karo
+  try {
+    await mongoose.connection.collection('users')
+      .deleteMany({ email: { $in: ['admin@test.com'] } });
+  } catch(e) {}
+  await mongoose.disconnect();
 });
 
 describe('Auth Routes', () => {
-  let token; // We'll store the token to reuse across tests
+  let token;
 
-  // Test: Register a new user
   it('should register a new user', async () => {
+    // Pehle delete karo agar exist karta hai
+    await mongoose.connection.collection('users')
+      .deleteMany({ email: 'admin@test.com' });
+
     const res = await request(app)
       .post('/api/auth/register')
       .send({
@@ -30,12 +38,11 @@ describe('Auth Routes', () => {
         role: 'admin',
       });
 
-    expect(res.statusCode).toBe(201);         // Expect 201 Created
-    expect(res.body.success).toBe(true);       // Expect success flag
-    expect(res.body.data.token).toBeDefined(); // Expect a token in response
+    expect(res.statusCode).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.token).toBeDefined();
   });
 
-  // Test: Login with correct credentials
   it('should login successfully', async () => {
     const res = await request(app)
       .post('/api/auth/login')
@@ -43,23 +50,21 @@ describe('Auth Routes', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.data.token).toBeDefined();
-    token = res.body.data.token; // Save token for next tests
+    token = res.body.data.token;
   });
 
-  // Test: Reject wrong password
   it('should reject wrong password', async () => {
     const res = await request(app)
       .post('/api/auth/login')
       .send({ email: 'admin@test.com', password: 'wrongpassword' });
 
-    expect(res.statusCode).toBe(401); // Expect 401 Unauthorized
+    expect(res.statusCode).toBe(401);
   });
 
-  // Test: Get current user with valid token
   it('should return current user with valid token', async () => {
     const res = await request(app)
       .get('/api/auth/me')
-      .set('Authorization', `Bearer ${token}`); // Send token in header
+      .set('Authorization', `Bearer ${token}`);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.data.user.email).toBe('admin@test.com');
